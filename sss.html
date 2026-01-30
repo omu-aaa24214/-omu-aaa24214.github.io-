@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <title>習志野市 地図表示</title>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.3.0/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.3.0/dist/MarkerCluster.Default.css" />
+    <script src="https://unpkg.com/leaflet.markercluster@1.3.0/dist/leaflet.markercluster.js"></script>
+
+    <script src="./L.KML.js"></script>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/mwasil/Leaflet.Rainviewer/leaflet.rainviewer.css" />
+    <script src="https://cdn.jsdelivr.net/gh/mwasil/Leaflet.Rainviewer/leaflet.rainviewer.js"></script>
+</head>
+
+<body>
+
+<div id="map" style="height: 80vh;"></div>
+
+<script>
+    // ===== 地図初期化（習志野市周辺） =====
+    const map = L.map('map', { center: [35.683, 140.020], zoom: 14 });
+    L.control.scale().addTo(map);
+
+    // ===== ベースレイヤー =====
+    const osmLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 });
+    const chiriinLayer = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', { maxZoom: 18 });
+    chiriinLayer.addTo(map);
+
+    // ===== LayerControl =====
+    const LayerControl = L.control.layers({
+        "OpenStreetMap": osmLayer,
+        "地理院地図（標準）": chiriinLayer
+    }).addTo(map);
+
+    // ===== 習志野市役所マーカー =====
+    L.marker([35.675, 140.028]).bindPopup("習志野市役所").addTo(map);
+
+    // ===== 行政区画（習志野市） =====
+    fetch("./N03-21_12_210101.geojson")
+        .then(res => res.json())
+        .then(data => {
+            const city = data.features.filter(f => f.properties.N03_004 === '習志野市');
+            const cityLayer = L.geoJSON(city, {
+                style: { color: "#FF0000", weight: 4, fillColor: "#FF0000", fillOpacity: 0.25 }
+            }).bindPopup(layer => layer.feature.properties.N03_004);
+            map.addLayer(cityLayer);
+            LayerControl.addOverlay(cityLayer, "行政区域（習志野市）");
+            map.fitBounds(cityLayer.getBounds());
+        }).catch(e => console.error("行政区画読み込み失敗:", e));
+
+    // ===== 千葉県の学校データ（クラスタ） =====
+    fetch('./P29-21_12.geojson')
+        .then(res => res.json())
+        .then(json => {
+            const citySchools = json.features.filter(f => f.properties.N03_004 === "習志野市");
+            const markers = L.markerClusterGroup();
+            L.geoJSON(citySchools, {
+                onEachFeature: (feature, layer) => layer.bindPopup(feature.properties.P29_004 || "名称不明")
+            }).addTo(markers);
+            map.addLayer(markers);
+            LayerControl.addOverlay(markers, "習志野市の学校（クラスタ）");
+        }).catch(e => console.error("学校データ読み込み失敗:", e));
+
+    // ===== OSRMルート（津田沼駅 -> 習志野市役所） =====
+    const routeUrl = 'https://routing.openstreetmap.de/routed-car/route/v1/driving/140.020,35.691;140.028,35.675?geometries=geojson&overview=full';
+    let routeLayer;
+    async function addRoute() {
+        try {
+            const res = await fetch(routeUrl);
+            const json = await res.json();
+            routeLayer = L.geoJSON(json.routes[0].geometry, { style: { color: "#FF00FF", weight: 6, opacity: 0.65 } }).addTo(map);
+            LayerControl.addOverlay(routeLayer, "習志野ルート（車）");
+            map.fitBounds(routeLayer.getBounds());
+        } catch (e) { console.error("ルート取得失敗:", e); }
+    }
+    addRoute();
+
+    // ===== KMLルート読み込み =====
+    fetch("./niigata_route.kml")
+        .then(res => res.text())
+        .then(kmltext => {
+            const parser = new DOMParser();
+            const kml = parser.parseFromString(kmltext, "text/xml");
+            const track = new L.KML(kml);
+            map.addLayer(track);
+            track.on('loaded', () => {
+                if(track.setStyle) track.setStyle({ color:"#0000FF", weight:4, opacity:0.7 });
+                map.fitBounds(track.getBounds());
+            });
+            LayerControl.addOverlay(track, "KMLルート");
+        }).catch(e => console.error("KML読み込み失敗:", e));
+
+    // ===== ラインGeoJSON =====
+    fetch("./line.geojson")
+        .then(res => res.json())
+        .then(data => {
+            const lineLayer = L.geoJSON(data, { style:{ color:"#FF00FF", weight:6, opacity:0.65 }});
+            map.addLayer(lineLayer);
+            LayerControl.addOverlay(lineLayer, "ルート(GeoJSON)");
+        }).catch(e => console.error("ライン読み込み失敗:", e));
+
+    // ===== 雨雲レイヤー =====
+    L.control.rainviewer({ position:'bottomleft', animationInterval:500, opacity:0.5 }).addTo(map);
+
+</script>
+</body>
+</html>
